@@ -6,6 +6,8 @@ import (
 	"time"
 )
 
+// there some other good examples, you can alse see
+// https://ayada.dev/posts/background-tasks-in-go/
 func main() {
 	DealWithTask()
 }
