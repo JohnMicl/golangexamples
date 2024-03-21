@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -59,29 +60,27 @@ type TaskManagerImpl interface {
 }
 
 type TaskManager struct {
-	done          chan interface{}
-	taskQueue     chan *Task
-	informerQueue chan *Task
+	done       chan interface{}
+	capability int
+	taskQueue  chan *Task
 }
 
 func NewTaskManager(workerN int) *TaskManager {
 	return &TaskManager{
-		done:          make(chan interface{}),
-		taskQueue:     make(chan *Task, workerN),
-		informerQueue: make(chan *Task, workerN),
+		capability: workerN,
+		done:       make(chan interface{}),
+		taskQueue:  make(chan *Task, workerN),
 	}
 }
 
 func (t *TaskManager) Stop() {
-	defer close(t.done)
 	defer close(t.taskQueue)
-	defer close(t.informerQueue)
+	defer close(t.done)
 }
 
 func (t *TaskManager) Run() {
 	for i := 0; i < 3; i++ {
 		go t.dowork(i)
-		go t.rollbackWork()
 	}
 }
 
@@ -93,27 +92,22 @@ func (t *TaskManager) dowork(workid int) {
 			return
 		case task := <-t.taskQueue:
 			fmt.Printf("Child %+v Received task %+v\n", workid, t)
-			handleTask(task, t.informerQueue)
+			handleTask(task)
 		}
 	}
 }
 
-func (t *TaskManager) rollbackWork() {
-	for {
-		select {
-		case <-t.done:
-			return
-		case task := <-t.informerQueue:
-			// do others to handle task
-			fmt.Printf("task received finished messages %v\n", task)
-		}
-	}
-}
+var ErrWorkerBusy = errors.New("workers are busy, try again later")
 
-func (t *TaskManager) TryAddTask(task *Task) {
+func (t *TaskManager) TryAddTask(task *Task) error {
 	// 缓冲区满了会导致调用阻塞，可在此添加超时机制
+	// 此处采用若任务队列满了，则返回错误由客户端重试
+	if len(t.taskQueue) >= t.capability {
+		return ErrWorkerBusy
+	}
 	t.taskQueue <- task
 	fmt.Println("Message enqueued successfully.")
+	return nil
 }
 
 func DealWithTask() {
@@ -124,17 +118,30 @@ func DealWithTask() {
 	// simulate task generation
 	for i := 0; i < 10; i++ {
 		task := Task{ID: i, Status: TaskInit}
-		taskmg.TryAddTask(&task)
-		time.Sleep(time.Millisecond * 100)
+		for j := 0; j < 3; j++ {
+			// 假设尝试3次
+			ok := taskmg.TryAddTask(&task)
+			if ok != nil {
+				fmt.Printf("------------------busy, task=%+v, error=%+v\n", task, ok)
+				time.Sleep(time.Second * 1)
+				continue
+			} else {
+				break
+			}
+		}
+		if i == 7 {
+			taskmg.Stop()
+			break
+		}
 	}
 	fmt.Printf("task finised end %v\n", time.Since(now))
-	time.Sleep(5 * time.Second)
+	time.Sleep(10 * time.Second)
 }
 
-func handleTask(task *Task, informer chan<- *Task) {
+func handleTask(task *Task) {
 	// simulate task handle
 	now := time.Now()
-	time.Sleep(1 * time.Second)
+	time.Sleep(2 * time.Second)
 	switch task.Status {
 	case TaskInit:
 		fmt.Printf("Start Hanle task %v\n", task)
@@ -145,7 +152,8 @@ func handleTask(task *Task, informer chan<- *Task) {
 	case TaskAborted:
 		fmt.Printf("Start Hanle task %v\n", task)
 	}
-	informer <- task
+
+	// handle done things, do some rollback
 	fmt.Printf("Task %v finished informer time now = %v\n", task, time.Since(now))
 }
 
