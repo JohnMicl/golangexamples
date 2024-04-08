@@ -1,1 +1,2 @@
 # golangexamples
+![](test.drawio.svg)
