@@ -1,0 +1,20 @@
+## sender
+```
+go build
+./main <filename> 127.0.0.1:12345
+```
+
+## receiver
+```
+go build
+./main 12345
+```
+
+
+## 对比结果
+4kb file
+```
+io.Copy sent 4000 bytes in 59.344µs
+Manual copy sent 4000 bytes in 66.036µs
+io.Copy was 1ns times faster than manual copy
+```
